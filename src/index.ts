@@ -22,21 +22,55 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { mkdtempSync, readFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
 
 const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const NATIVE_HELPER_PATH = join(__dirname, "native", "fantastical-helper");
+// The helper lives inside an ad-hoc-signed .app bundle and is launched via
+// `open -W` so LaunchServices detaches it from node's attribution chain.
+// Without this, TCC sees an unsigned node (from nvm/Homebrew) as the
+// "responsible" process in the chain and auto-denies Calendar access without
+// ever prompting the user. See issue #6 for full diagnosis.
+const HELPER_APP_PATH = join(__dirname, "native", "FantasticalHelper.app");
+
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
 
 async function runNativeHelper(command: string, arg?: string): Promise<string | null> {
+  // Create a per-invocation temp directory for the JSON output, so concurrent
+  // calls can't collide and we always clean up.
+  const workDir = mkdtempSync(join(tmpdir(), "mcp-fantastical-"));
+  const outputPath = join(workDir, "result.json");
+
   try {
-    const cmd = arg ? `${NATIVE_HELPER_PATH} ${command} ${arg}` : `${NATIVE_HELPER_PATH} ${command}`;
-    const { stdout } = await execAsync(cmd, { timeout: 10000 });
-    return stdout.trim();
-  } catch {
+    const helperArgs = [command];
+    if (arg) helperArgs.push(arg);
+    helperArgs.push("--output", outputPath);
+
+    const quotedArgs = helperArgs.map(shellQuote).join(" ");
+    // `open -W` waits for the launched app to exit. `-n` forces a new instance
+    // (needed because each MCP call is independent). `-g` keeps it in the
+    // background so no dock icon flashes even though LSUIElement is set.
+    const cmd = `/usr/bin/open -W -n -g -a ${shellQuote(HELPER_APP_PATH)} --args ${quotedArgs}`;
+
+    // 30s timeout leaves headroom for the one-time TCC prompt on first run.
+    await execAsync(cmd, { timeout: 30000 });
+
+    return readFileSync(outputPath, "utf8").trim();
+  } catch (err) {
+    console.error("[mcp-fantastical] native helper failed:", err instanceof Error ? err.message : err);
     return null;
+  } finally {
+    try {
+      rmSync(workDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup failures
+    }
   }
 }
 

@@ -94,10 +94,14 @@ On first run, you may need to grant the following permissions:
 2. Add Terminal (or your terminal app) to the allowed list
 
 **Full Calendar Access (for reading events):**
-1. System Preferences → Privacy & Security → Calendars
-2. Grant "Full Calendar Access" to your terminal app or the process running the MCP server
 
-Note: On macOS Sonoma and later, reading calendar events via AppleScript may fail with permission errors when running in subprocess contexts (e.g., MCP servers spawned by Claude). The native EventKit helper resolves this by using a different permission model.
+The native helper ships as an ad-hoc-signed `.app` bundle (`FantasticalHelper.app`). The first time the MCP server reads calendar data, macOS will show a one-time prompt attributed to **"FantasticalHelper"** asking to grant Full Calendar Access. Approve it.
+
+If you miss the prompt or need to re-grant later:
+1. System Settings → Privacy & Security → Calendars
+2. Enable **FantasticalHelper**
+
+Note: Prior versions shipped a raw helper binary, which macOS couldn't attribute a TCC permission to when launched under Claude Desktop — the prompt never appeared and access was silently denied ([#6](https://github.com/aplaceforallmystuff/mcp-fantastical/issues/6)). The bundled + signed helper fixes this.
 
 ## Usage Examples
 
@@ -155,13 +159,14 @@ Grant accessibility permissions:
 2. Click the lock to make changes
 3. Add Terminal (or your terminal app) and enable it
 
-### Calendar permission errors (-1743) or timeouts when reading events
-This occurs when the MCP server runs in a subprocess context (e.g., spawned by Claude Code or other MCP clients). macOS TCC permissions don't properly inherit through process chains.
+### Calendar permission errors, or "Calendar access denied" under Claude Desktop
+macOS TCC permissions don't inherit through the Claude Desktop → npx → node → helper chain. The native helper is wrapped in an ad-hoc-signed `FantasticalHelper.app` bundle so macOS has a stable code identity to attribute the calendar permission to.
 
 **Solutions:**
-1. **Recommended**: The native EventKit helper (`dist/native/fantastical-helper`) handles this automatically. Rebuild with `npm run build` to compile it.
-2. Grant "Full Calendar Access" in System Settings → Privacy & Security → Calendars to the terminal app
-3. If running from source, ensure the Swift helper is compiled: `npm run build:native`
+1. Look for a one-time system prompt attributed to **FantasticalHelper** and approve it. If it appeared behind another window, restart your MCP client and retry.
+2. Check System Settings → Privacy & Security → Calendars and enable **FantasticalHelper**.
+3. If running from source, rebuild the bundle: `npm run build:native`.
+4. If the bundle is missing a code signature for any reason, re-sign it: `codesign --force --sign - dist/native/FantasticalHelper.app`.
 
 ### "Error: This MCP server only works on macOS"
 This server requires macOS because Fantastical is a macOS application. It uses AppleScript to communicate with Fantastical and the Calendar app.

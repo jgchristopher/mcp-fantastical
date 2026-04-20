@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-20
+
+### Fixed
+- Calendar access denied under Claude Desktop due to TCC attribution failure ([#6](https://github.com/aplaceforallmystuff/mcp-fantastical/issues/6)). The EventKit helper is now wrapped in an ad-hoc-signed `FantasticalHelper.app` bundle with its own `CFBundleIdentifier` and `NSCalendarsFullAccessUsageDescription`, AND launched via `open -W` rather than direct `exec`. The bundle alone isn't enough — when spawned as a child of node, TCC treats the unsigned node binary (common with nvm/Homebrew Node installs) as the "responsible process" in the attribution chain and auto-denies without ever prompting. Routing through LaunchServices (`open`) detaches the helper from node's chain so it becomes its own responsible process. On first run, users see a one-time system prompt attributed to "FantasticalHelper".
+
+### Changed
+- Native helper path moved from `dist/native/fantastical-helper` to `dist/native/FantasticalHelper.app/Contents/MacOS/fantastical-helper`.
+- Helper writes JSON to a temp file via a `--output <path>` argument (rather than stdout) because `open -W` detaches stdio from the caller. The TypeScript wrapper creates a per-invocation temp dir and reads the result back.
+- Native helper timeout raised from 10s to 30s to accommodate the first-run TCC prompt.
+- Native helper failures now log to stderr instead of being silently swallowed.
+
 ## [1.1.0] - 2026-02-27
 
 ### Added
