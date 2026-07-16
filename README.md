@@ -27,10 +27,12 @@ MCP server for [Fantastical](https://flexibits.com/fantastical) - the powerful c
 
 ## Prerequisites
 
-- macOS (Fantastical is macOS-only)
+- macOS
 - Node.js 18+
-- [Fantastical](https://flexibits.com/fantastical) installed
-- Calendar access permissions for Terminal/Claude
+- Your calendar accounts added in System Settings → Internet Accounts. Reads go through EventKit, which only sees what macOS itself syncs.
+- [Fantastical](https://flexibits.com/fantastical) installed — required only for `fantastical_create_event` and the UI tools, which drive the `x-fantastical3://` URL scheme. Reading events does not need the app.
+
+Xcode is **not** required. `npm install` installs the signed helper from `prebuilt/`. You only need a compiler and a signing certificate if you are changing the helper itself (see Development).
 
 ## Installation
 
@@ -95,13 +97,21 @@ On first run, you may need to grant the following permissions:
 
 **Full Calendar Access (for reading events):**
 
-The native helper ships as an ad-hoc-signed `.app` bundle (`FantasticalHelper.app`). The first time the MCP server reads calendar data, macOS will show a one-time prompt attributed to **"FantasticalHelper"** asking to grant Full Calendar Access. Approve it.
+The native helper ships as a signed `.app` bundle (`FantasticalHelper.app`) in `prebuilt/`, installed as-is by `npm install`. The first time the MCP server reads calendar data, macOS shows a one-time prompt attributed to **"FantasticalHelper"** asking to grant Full Calendar Access. Approve it.
+
+The grant is per machine and cannot be copied between them. That is macOS policy, not a limitation of this server.
 
 If you miss the prompt or need to re-grant later:
 1. System Settings → Privacy & Security → Calendars
 2. Enable **FantasticalHelper**
 
-Note: Prior versions shipped a raw helper binary, which macOS couldn't attribute a TCC permission to when launched under Claude Desktop — the prompt never appeared and access was silently denied ([#6](https://github.com/aplaceforallmystuff/mcp-fantastical/issues/6)). The bundled + signed helper fixes this.
+**If it denies with no prompt at all**, the bundle is missing its entitlement. Under hardened runtime, TCC requires `com.apple.security.personal-information.calendars` before it will even ask: without it the request is denied instantly, no dialog appears, and no decision is recorded — indistinguishable from you having clicked Deny. Check with:
+
+```bash
+codesign -d --entitlements - --xml dist/native/FantasticalHelper.app | plutil -p -
+```
+
+Note: prior versions shipped a raw helper binary, which macOS couldn't attribute a TCC permission to when launched under Claude Desktop — the prompt never appeared and access was silently denied ([#6](https://github.com/aplaceforallmystuff/mcp-fantastical/issues/6)). The bundled + signed helper fixes this.
 
 ## Usage Examples
 
@@ -154,6 +164,33 @@ npm run build
 # Run locally
 node dist/index.js
 ```
+
+### Changing the native helper
+
+`npm install` installs the signed bundle from `prebuilt/` and never compiles, so a
+change to `native/FantasticalHelper.swift` has no effect until you rebuild it.
+
+Building from source needs Xcode Command Line Tools and a codesigning identity:
+
+```bash
+security find-identity -v -p codesigning
+export MCP_FANTASTICAL_SIGN_IDENTITY="Apple Development: Your Name (XXXXXXXXXX)"
+
+npm run build:native      # build to dist/, for testing
+npm run build:prebuilt    # build, then refresh prebuilt/ -- commit the result
+```
+
+The identity matters beyond mere signing. macOS records the calendar grant against
+the bundle's designated requirement, which `build.sh` pins to the certificate's team
+ID (`leaf[subject.OU]`) rather than its name, so the grant survives both rebuilds and
+certificate reissues. Ad-hoc signing has no certificate at all: the identity becomes
+the code hash, every rebuild reads as a different app, and the grant is lost each
+time. That is why `build.sh` prefers copying `prebuilt/` over ad-hoc signing when no
+identity is set.
+
+Since the bundle is committed, `npm run build:prebuilt` is a required step when the
+helper changes. Nothing runs it automatically — refreshing a committed binary on
+every dev build would put a binary diff in unrelated commits.
 
 ## Troubleshooting
 
