@@ -30,11 +30,14 @@ const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// The helper lives inside an ad-hoc-signed .app bundle and is launched via
-// `open -W` so LaunchServices detaches it from node's attribution chain.
-// Without this, TCC sees an unsigned node (from nvm/Homebrew) as the
-// "responsible" process in the chain and auto-denies Calendar access without
-// ever prompting the user. See issue #6 for full diagnosis.
+// The helper lives inside a signed .app bundle and is launched via `open -W` so
+// LaunchServices detaches it from node's attribution chain. Without this, TCC
+// sees an unsigned node (from nvm/Homebrew) as the "responsible" process in the
+// chain and auto-denies Calendar access without ever prompting the user.
+// See issue #6 for full diagnosis.
+//
+// The bundle's signing identity is what TCC records the grant against, so it
+// must stay stable across rebuilds. See native/build.sh.
 const HELPER_APP_PATH = join(__dirname, "native", "FantasticalHelper.app");
 
 function shellQuote(s: string): string {
