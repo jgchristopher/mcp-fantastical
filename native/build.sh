@@ -19,9 +19,51 @@ swiftc -O -o "$MACOS_DIR/fantastical-helper" \
 
 cp "$SCRIPT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
-# Ad-hoc sign so macOS TCC has a stable code identity to attribute the
-# calendar permission to. Without this, permission never inherits through
-# Claude Desktop -> npx -> node -> helper, and macOS never prompts.
-codesign --force --sign - "$APP_BUNDLE"
+# macOS records the calendar grant against this bundle's designated requirement
+# (DR), so the DR must stay identical across rebuilds or TCC silently denies access.
+#
+# Ad-hoc (-) has no leaf certificate, so the identity falls back to the code hash
+# and every rebuild reads as a different app. Signing with a real certificate fixes
+# that, but codesign's *default* DR for an Apple Development certificate pins
+# leaf[subject.CN] -- the full certificate name, including its per-certificate
+# identifier. That breaks the grant whenever the certificate is reissued.
+#
+# So pin leaf[subject.OU] (the team ID) instead. It is stable across certificate
+# renewals, and it is what Developer ID certificates pin by default anyway.
+#
+# Set MCP_FANTASTICAL_SIGN_IDENTITY to a stable identity, e.g.
+#   export MCP_FANTASTICAL_SIGN_IDENTITY="Apple Development: Jane Doe (XXXXXXXXXX)"
+# List candidates with: security find-identity -v -p codesigning
+SIGN_IDENTITY="${MCP_FANTASTICAL_SIGN_IDENTITY:-}"
+
+if [ -z "$SIGN_IDENTITY" ]; then
+    echo "WARNING: MCP_FANTASTICAL_SIGN_IDENTITY is not set, falling back to ad-hoc signing."
+    echo "         Calendar access will break after each rebuild until it is re-granted."
+    echo "         See the comment in native/build.sh to fix this permanently."
+    codesign --force --sign - "$APP_BUNDLE"
+else
+    BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SCRIPT_DIR/Info.plist")"
+    TEAM_ID="$(security find-certificate -c "$SIGN_IDENTITY" -p 2>/dev/null \
+        | openssl x509 -noout -subject 2>/dev/null \
+        | sed -n 's/.*OU *= *\([A-Za-z0-9]*\).*/\1/p')"
+
+    echo "Signing with: $SIGN_IDENTITY"
+    if [ -z "$TEAM_ID" ]; then
+        # Without a team ID we cannot build the DR, and codesign's default would
+        # pin the certificate CN. Say so rather than silently shipping a fragile grant.
+        echo "WARNING: could not read a team ID (OU) from that certificate."
+        echo "         Falling back to codesign's default requirement, which pins the"
+        echo "         certificate name: calendar access will break when it is reissued."
+        codesign --force --timestamp --options runtime \
+            --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
+    else
+        echo "Pinning designated requirement to team: $TEAM_ID ($BUNDLE_ID)"
+        codesign --force --timestamp --options runtime \
+            -r="designated => identifier \"$BUNDLE_ID\" and anchor apple generic and certificate leaf[subject.OU] = \"$TEAM_ID\"" \
+            --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
+    fi
+fi
 
 echo "Built: $APP_BUNDLE"
+echo "Designated requirement:"
+codesign -d -r- "$APP_BUNDLE" 2>&1 | sed -n 's/^designated/  designated/p'

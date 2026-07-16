@@ -7,7 +7,7 @@
     <key>CFBundleExecutable</key>
     <string>fantastical-helper</string>
     <key>CFBundleIdentifier</key>
-    <string>io.github.aplaceforallmystuff.mcp-fantastical.helper</string>
+    <string>dev.sideeffects.mcp-fantastical.helper</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
