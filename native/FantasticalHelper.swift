@@ -56,6 +56,109 @@ func formatDate(_ date: Date) -> String {
     return formatter.string(from: date)
 }
 
+func participantStatusString(_ status: EKParticipantStatus) -> String {
+    switch status {
+    case .unknown: return "unknown"
+    case .pending: return "pending"
+    case .accepted: return "accepted"
+    case .declined: return "declined"
+    case .tentative: return "tentative"
+    case .delegated: return "delegated"
+    case .completed: return "completed"
+    case .inProcess: return "inProcess"
+    @unknown default: return "unknown"
+    }
+}
+
+func participantRoleString(_ role: EKParticipantRole) -> String {
+    switch role {
+    case .unknown: return "unknown"
+    case .required: return "required"
+    case .optional: return "optional"
+    case .chair: return "chair"
+    case .nonParticipant: return "nonParticipant"
+    @unknown default: return "unknown"
+    }
+}
+
+func eventStatusString(_ status: EKEventStatus) -> String {
+    switch status {
+    case .none: return "none"
+    case .confirmed: return "confirmed"
+    case .tentative: return "tentative"
+    case .canceled: return "canceled"
+    @unknown default: return "unknown"
+    }
+}
+
+func availabilityString(_ availability: EKEventAvailability) -> String {
+    switch availability {
+    case .notSupported: return "notSupported"
+    case .busy: return "busy"
+    case .free: return "free"
+    case .tentative: return "tentative"
+    case .unavailable: return "unavailable"
+    @unknown default: return "unknown"
+    }
+}
+
+// Conferencing links hide in three different places depending on the provider:
+// Google Meet writes them into notes, Zoom invites often put them in location,
+// and some clients set the event URL. Check all three rather than assume.
+let conferenceRegex = try? NSRegularExpression(
+    pattern: #"https?://(?:[A-Za-z0-9-]+\.)*(?:meet\.google\.com|zoom\.us|teams\.microsoft\.com|teams\.live\.com|webex\.com|meet\.jit\.si|whereby\.com|chime\.aws)/[^\s<>"']*"#,
+    options: [.caseInsensitive]
+)
+
+func firstConferenceURL(in text: String?) -> String? {
+    guard let text, !text.isEmpty, let regex = conferenceRegex else { return nil }
+    let range = NSRange(text.startIndex..., in: text)
+    guard let match = regex.firstMatch(in: text, options: [], range: range),
+          let matched = Range(match.range, in: text) else { return nil }
+    return String(text[matched])
+}
+
+func conferenceURL(for evt: EKEvent) -> String? {
+    firstConferenceURL(in: evt.url?.absoluteString)
+        ?? firstConferenceURL(in: evt.location)
+        ?? firstConferenceURL(in: evt.notes)
+}
+
+func serializeParticipant(_ p: EKParticipant) -> [String: Any] {
+    var out: [String: Any] = [
+        "status": participantStatusString(p.participantStatus),
+        "role": participantRoleString(p.participantRole),
+        "isCurrentUser": p.isCurrentUser,
+        "email": p.url.absoluteString.replacingOccurrences(of: "mailto:", with: "")
+    ]
+    if let name = p.name { out["name"] = name }
+    return out
+}
+
+func serialize(_ evt: EKEvent) -> [String: Any] {
+    var out: [String: Any] = [
+        "title": evt.title ?? "",
+        "calendar": evt.calendar.title,
+        "calendarSource": evt.calendar.source.title,
+        "calendarId": evt.calendar.calendarIdentifier,
+        "start": toISO(evt.startDate),
+        "end": toISO(evt.endDate),
+        "isAllDay": evt.isAllDay,
+        "location": evt.location ?? "",
+        "status": eventStatusString(evt.status),
+        "availability": availabilityString(evt.availability),
+        "notes": evt.notes ?? ""
+    ]
+    if let url = conferenceURL(for: evt) { out["conferenceURL"] = url }
+    if let attendees = evt.attendees, !attendees.isEmpty {
+        out["attendees"] = attendees.map(serializeParticipant)
+    }
+    if let organizer = evt.organizer {
+        out["organizer"] = serializeParticipant(organizer)
+    }
+    return out
+}
+
 store.requestFullAccessToEvents { granted, _ in
     guard granted else {
         emit(["error": "Calendar access denied. Open System Settings > Privacy & Security > Calendars and enable FantasticalHelper."])
@@ -75,15 +178,7 @@ store.requestFullAccessToEvents { granted, _ in
         }
         let pred = store.predicateForEvents(withStart: start, end: end, calendars: nil)
         let events = store.events(matching: pred).sorted { $0.startDate < $1.startDate }
-        let result: [[String: String]] = events.map { evt in
-            [
-                "title": evt.title ?? "",
-                "calendar": evt.calendar.title,
-                "start": toISO(evt.startDate),
-                "end": toISO(evt.endDate),
-                "location": evt.location ?? ""
-            ]
-        }
+        let result = events.map(serialize)
         emit([
             "date": formatDate(Date()),
             "count": events.count,
@@ -100,15 +195,7 @@ store.requestFullAccessToEvents { granted, _ in
         }
         let pred = store.predicateForEvents(withStart: start, end: end, calendars: nil)
         let events = store.events(matching: pred).sorted { $0.startDate < $1.startDate }
-        let result: [[String: String]] = events.map { evt in
-            [
-                "title": evt.title ?? "",
-                "calendar": evt.calendar.title,
-                "start": toISO(evt.startDate),
-                "end": toISO(evt.endDate),
-                "location": evt.location ?? ""
-            ]
-        }
+        let result = events.map(serialize)
         emit([
             "range": [
                 "start": formatDate(start),
@@ -121,7 +208,16 @@ store.requestFullAccessToEvents { granted, _ in
 
     case "calendars":
         let cals = store.calendars(for: .event)
-        let result = cals.map { ["name": $0.title, "id": $0.calendarIdentifier] }
+        // Several calendars share a title ("Holidays in United States" appears once
+        // per account), so the source is what actually disambiguates them.
+        let result = cals.map { cal -> [String: Any] in
+            [
+                "name": cal.title,
+                "id": cal.calendarIdentifier,
+                "source": cal.source.title,
+                "allowsModify": cal.allowsContentModifications
+            ]
+        }
         emit(["count": cals.count, "calendars": result] as [String: Any])
 
     default:
