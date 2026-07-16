@@ -36,6 +36,17 @@ cp "$SCRIPT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 # List candidates with: security find-identity -v -p codesigning
 SIGN_IDENTITY="${MCP_FANTASTICAL_SIGN_IDENTITY:-}"
 
+# Hardened runtime (--options runtime, below) makes TCC require an explicit
+# entitlement per protected resource. Without
+# com.apple.security.personal-information.calendars, tccd denies the calendar
+# request instantly: no prompt, and no decision recorded in the TCC database, which
+# looks exactly like the user having clicked Deny. The Info.plist usage description
+# is necessary but not sufficient.
+#
+# Keep that file free of XML comments. AMFI parses entitlements with a stricter
+# reader than plutil and fails on them ("AMFIUnserializeXML: syntax error").
+ENTITLEMENTS="$SCRIPT_DIR/FantasticalHelper.entitlements"
+
 if [ -z "$SIGN_IDENTITY" ]; then
     echo "WARNING: MCP_FANTASTICAL_SIGN_IDENTITY is not set, falling back to ad-hoc signing."
     echo "         Calendar access will break after each rebuild until it is re-granted."
@@ -55,10 +66,12 @@ else
         echo "         Falling back to codesign's default requirement, which pins the"
         echo "         certificate name: calendar access will break when it is reissued."
         codesign --force --timestamp --options runtime \
+            --entitlements "$ENTITLEMENTS" \
             --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
     else
         echo "Pinning designated requirement to team: $TEAM_ID ($BUNDLE_ID)"
         codesign --force --timestamp --options runtime \
+            --entitlements "$ENTITLEMENTS" \
             -r="designated => identifier \"$BUNDLE_ID\" and anchor apple generic and certificate leaf[subject.OU] = \"$TEAM_ID\"" \
             --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
     fi
