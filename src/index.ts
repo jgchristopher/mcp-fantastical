@@ -193,8 +193,11 @@ const TOOLS: Tool[] = [
     },
   },
   {
-    name: "fantastical_search",
-    description: "Search for events by text in Fantastical",
+    name: "fantastical_open_search",
+    description:
+      "Open Fantastical's search UI for a query. This is a UI navigation command: " +
+      "it shows results to the user on screen and returns NO event data to the caller. " +
+      "To read events, use fantastical_get_today or fantastical_get_upcoming instead.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -459,10 +462,12 @@ return output`;
         };
       }
 
-      case "fantastical_search": {
+      case "fantastical_open_search": {
         const { query } = args as { query: string };
 
-        // Search using URL scheme which opens Fantastical's search
+        // The x-fantastical3 URL scheme only navigates the app; Fantastical exposes
+        // no read API, so nothing comes back. Event data comes from EventKit via the
+        // native helper instead (see fantastical_get_today / fantastical_get_upcoming).
         const script = `do shell script "open 'x-fantastical3://search?query=${encodeURIComponent(query)}'"`;
         await runAppleScript(script);
 
@@ -470,8 +475,11 @@ return output`;
           content: [{
             type: "text",
             text: JSON.stringify({
-              success: true,
-              message: `Opened Fantastical search for: "${query}"`,
+              opened: true,
+              events: null,
+              message:
+                `Opened Fantastical's search UI for "${query}". No event data is returned ` +
+                `by this tool. Use fantastical_get_today or fantastical_get_upcoming to read events.`,
             }, null, 2),
           }],
         };

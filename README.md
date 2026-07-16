@@ -129,14 +129,18 @@ Note: Prior versions shipped a raw helper binary, which macOS couldn't attribute
 
 ## Available Tools
 
-| Tool | Description |
-|------|-------------|
-| `fantastical_create_event` | Create an event using natural language parsing |
-| `fantastical_get_today` | Get today's calendar events |
-| `fantastical_get_upcoming` | Get upcoming events for specified number of days |
-| `fantastical_show_date` | Open Fantastical to a specific date |
-| `fantastical_get_calendars` | List all available calendars |
-| `fantastical_search` | Search for events by query |
+Tools split into two kinds. **Reads** go through EventKit via the native helper and
+return data. **UI commands** drive Fantastical through its `x-fantastical3` URL scheme
+and return nothing to the caller, because Fantastical exposes no read API.
+
+| Tool | Kind | Description |
+|------|------|-------------|
+| `fantastical_get_today` | read | Today's events, with attendees, notes, and conference links |
+| `fantastical_get_upcoming` | read | Events for the next N days, same fields |
+| `fantastical_get_calendars` | read | List available calendars with their source |
+| `fantastical_create_event` | write | Create an event using Fantastical's natural language parser |
+| `fantastical_show_date` | UI | Open Fantastical to a specific date. Returns no data |
+| `fantastical_open_search` | UI | Open Fantastical's search UI. **Returns no event data** |
 
 ## Development
 
